@@ -1,0 +1,97 @@
+- name: Install new node
+  hosts: all
+  user: mariusz
+  gather_facts: no
+  tasks:
+    - name: Disable swap
+      ansible.builtin.shell: swapoff -a
+      become: yes
+    - name: Remove swap entry from file
+      become: yes
+      replace:
+        path: /etc/fstab 
+        regexp: '(.*swap.img.*)'
+        replace: '#\1'
+    - name: Enable overlay
+      become: yes
+      ansible.builtin.shell: modprobe overlay
+    - name: Enable br_netfilter
+      become: yes
+      ansible.builtin.shell: modprobe br_netfilter
+    - name: Add containerd.conf
+      become: yes
+      copy:
+        dest: /etc/modules-load.d/containerd.conf
+        content: |
+          overlay
+          br_netfilter
+    - name: Add 99-kubernetes-cri.conf
+      become: yes
+      copy:
+        dest: /etc/sysctl.d/99-kubernetes-cri.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+    - name: Enable net configuration
+      ansible.builtin.shell: sysctl --system
+      become: yes
+    - name: Update
+      ansible.builtin.shell: apt-get update
+      become: yes
+    - name: Install containerd
+      ansible.builtin.shell: apt-get install -y containerd
+      become: yes
+    - name: Create folder
+      ansible.builtin.shell: mkdir -p /etc/containterd
+      become: yes
+    - name: Create default configuration
+      ansible.builtin.shell: containerd config default > /etc/containterd/config.toml
+      become: yes       
+    - name: Set SystemdCgroup na true
+      ansible.builtin.shell: sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containterd/config.toml  
+      become: yes  
+    - name: Restart containerd
+      ansible.builtin.shell: systemctl restart containerd
+      become: yes
+    - name: Restart containerd
+      ansible.builtin.shell: curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+      become: yes
+    - name: Add kubernetes.list
+      become: yes
+      copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        content: |
+          deb https://apt.kubernetes.io/ kubernetes-xenial main
+    - name: Update
+      ansible.builtin.shell: apt-get update
+      become: yes
+    - name: Apt mark hold
+      ansible.builtin.shell: apt-mark unhold kubelet kubeadm kubectl containerd
+      become: yes      
+    - name: Install kubernetes
+      ansible.builtin.shell: apt-get install -y kubelet=1.22.0-00 kubeadm=1.22.0-00 kubectl=1.22.0-00
+      become: yes
+    - name: Apt mark hold
+      ansible.builtin.shell: apt-mark hold kubelet kubeadm kubectl containerd
+      become: yes
+    - name: Apt mark hold
+      ansible.builtin.shell: systemctl enable kubelet.service
+      become: yes
+    - name: Apt mark hold
+      ansible.builtin.shell: systemctl enable containerd.service
+      become: yes   
+    - name: Wget callico
+      ansible.builtin.shell: wget https://docs.projectcalico.org/manifests/calico.yaml
+      become: yes       
+    - name: Set SystemdCgroup na true
+      ansible.builtin.shell: |
+        sed -i 's/# - name: CALICO_IPV4POOL_CIDR/ - name: CALICO_IPV4POOL_CIDR/' calico.yaml  
+      become: yes
+    - name: Configure ip address range
+      ansible.builtin.shell: |
+        sed -i 's/#   value: "192.168.0.0\/16"/   value: "172.168.0.0\/16"/' calico.yaml  
+      become: yes                
+    # - name: Join Cluster
+    #   ansible.builtin.shell: kubeadm join 192.168.0.26:6443 --token eju6bv.ayjele9qz49bfwba --discovery-token-ca-cert-hash sha256:427980f09d6e4ef52180da65f9bb7e7ea352d04c1c44b7c6692bd7895aa679f3
+    #   become: yes  
